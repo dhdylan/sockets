@@ -15,6 +15,7 @@
 #include <iostream>
 #include <string>
 #include <cerrno>
+#include <vector>
 
 int RunServer()
 {
@@ -135,9 +136,17 @@ int RunServer()
     // recv acknowledge message
     //==========================
 
+    std::vector<char> completeMessage;
     char buffer[256]{};
 
     int bytesRead = recv(communicatorSocketFd, buffer, sizeof(buffer), 0);
+
+    while(bytesRead == 256)
+    {
+        completeMessage.insert(completeMessage.begin(), std::begin(buffer), std::end(buffer));
+        bytesRead = recv(communicatorSocketFd, buffer, sizeof(buffer), 0);
+    }    
+
     if (bytesRead == -1)
     {
         std::cerr << "recv failed: " << strerror(errno) << std::endl;
@@ -243,6 +252,17 @@ int RunClient()
     {
         std::cerr << "send failed: " << strerror(errno) << std::endl;
         return 1;
+    }
+
+    // what happens if i send it a bunch more times? what happens to the buffer?
+    for (int i=0; i<20; i++)
+    {
+        // send it again immediately and see how the server receives it
+        if ((bytesSent = send(socketFd, message.data(), message.size(), 0)) == -1)
+        {
+            std::cerr << "send failed: " << strerror(errno) << std::endl;
+            return 1;
+        } 
     }
 
     //=================================================
