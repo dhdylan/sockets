@@ -138,7 +138,9 @@ int RunClient()
     // create a socket from the address info we filled out
     //=======================================================
 
-    int socketFd = socket(serverAddressInfo->ai_family, serverAddressInfo->ai_socktype, serverAddressInfo->ai_protocol);
+    // remember, the above getaddrinfo is not to use for passing into this socket.
+    // we want an IPv4 socket, for DGRAM, and 0 to tell it which protocol to pick based on what type (2nd arg) we chose
+    int socketFd = socket(AF_INET, SOCK_DGRAM, 0);
     if (socketFd == -1)
     {
         std::cerr << "socket failed: " << strerror(errno) << std::endl;
@@ -155,7 +157,7 @@ int RunClient()
     }
 
     //=================================================
-    // connect to sockaddr with the created socket
+    // send to target with message
     //=================================================
 
     std::string message("Hello server, anyone there?");
