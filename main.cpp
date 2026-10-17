@@ -83,8 +83,9 @@ int RunServer()
     // in a real application, this hsould first read the family of the sockaddr_storage that was received to then determine which type it should be casted to
     sockaddr_in* senderCastedSockAddr = reinterpret_cast<sockaddr_in*>(&senderSockAddr);
     char senderAddrString[INET_ADDRSTRLEN];
+    int senderPort = ntohs(senderCastedSockAddr->sin_port);
     inet_ntop(senderCastedSockAddr->sin_family, &senderCastedSockAddr->sin_addr, senderAddrString, INET_ADDRSTRLEN);
-    std::cout << "Message received from: " << senderAddrString << ":" << senderCastedSockAddr->sin_port << ":: " << buffer << std::endl; 
+    std::cout << "Message received from: " << senderAddrString << ":" << senderPort << ":: " << std::string(buffer, bytesRead) << std::endl;
 
     //==========================
     // tell them you heard it
@@ -95,8 +96,10 @@ int RunServer()
 
     std::cout << "Sending greeting message to client ..." << std::endl;
 
+    sleep(2);
+
     std::string message("Hello from the server!");
-    ssize_t sent = sendto(socketFd, message.data(), message.size(), 0, reinterpret_cast<sockaddr*>(senderCastedSockAddr), sizeof(sockaddr_in));
+    ssize_t sent = sendto(socketFd, message.data(), message.size(), 0, reinterpret_cast<sockaddr*>(&senderSockAddr), senderSockAddrSize);
     if(sent == -1)
     {
         std::cerr << "sendto failed: " << strerror(errno) << std::endl;
@@ -116,29 +119,11 @@ int RunServer()
 }
 
 int RunClient()
-{
-    //=================================================
-    // get a sockaddr to use with getaddrinfo
-    //=================================================
-    
-    struct addrinfo hints{}, *serverAddressInfo;
-    int status = -1;
-    
-    hints.ai_family = AF_INET; // i wanna use IPv4
-    hints.ai_socktype = SOCK_STREAM; // dont entirely understand why we need to specify sock stream to getaddrinfo, it seems like something you should pass into socket
-
-    // use getaddrinfo to fill out the addrinfo struct
-    if ((status = getaddrinfo("127.0.0.1", "3490", &hints, &serverAddressInfo)) != 0)
-    {
-        std::cerr << "getaddrinfo failed: " << gai_strerror(status);
-        return 1;
-    }
-
+{    
     //=======================================================
-    // create a socket from the address info we filled out
+    // create a socket to use
     //=======================================================
-
-    // remember, the above getaddrinfo is not to use for passing into this socket.
+    
     // we want an IPv4 socket, for DGRAM, and 0 to tell it which protocol to pick based on what type (2nd arg) we chose
     int socketFd = socket(AF_INET, SOCK_DGRAM, 0);
     if (socketFd == -1)
@@ -146,20 +131,38 @@ int RunClient()
         std::cerr << "socket failed: " << strerror(errno) << std::endl;
         return 1;
     }
-
-    // enable reuse of this socket address so we dont end up getting EADDRINUSE
-    // when we try to open the same socket after closing it.
-    const int ENABLE = 1;
-    if (setsockopt(socketFd, SOL_SOCKET, SO_REUSEADDR, &ENABLE, sizeof(int)) == -1)
+    
+    // bind the port to 3491
+    sockaddr_in selfAddr{};
+    selfAddr.sin_family = AF_INET;
+    selfAddr.sin_port = htons(3491);
+    bind(socketFd, reinterpret_cast<sockaddr*>(&selfAddr), sizeof(selfAddr));
+    
+    //=================================================
+    // get server sockaddr to use with getaddrinfo
+    //=================================================
+    
+    struct addrinfo hints{}, *serverAddressInfo;
+    int status = -1;
+    
+    hints.ai_family = AF_INET; // i wanna use IPv4
+    hints.ai_socktype = SOCK_DGRAM;
+    
+    // use getaddrinfo to fill out the addrinfo struct
+    if ((status = getaddrinfo("127.0.0.1", "3490", &hints, &serverAddressInfo)) != 0)
     {
-        std::cerr << "setsockopt failed: " << strerror(errno) << std::endl;
+        std::cerr << "getaddrinfo failed: " << gai_strerror(status);
         return 1;
     }
-
+    
     //=================================================
     // send to target with message
-    //=================================================
-
+    //=================================================    
+    
+    std::cout << "sending message to server ..." << std::endl;
+    
+    sleep(2);
+    
     std::string message("Hello server, anyone there?");
     ssize_t bytesSent = -1;
     if ((bytesSent = sendto(socketFd, message.data(), message.size(), 0, serverAddressInfo->ai_addr, serverAddressInfo->ai_addrlen)) == -1)
@@ -175,19 +178,30 @@ int RunClient()
     char buffer[256]{};
     ssize_t bytesRead{};
     sockaddr_storage senderSockAddr{};
-    socklen_t socklen{};
+    socklen_t socklen = sizeof(senderSockAddr);
     if ((bytesRead = recvfrom(socketFd, buffer, sizeof(buffer), 0, reinterpret_cast<sockaddr*>(&senderSockAddr), &socklen)) == -1)
     {
         std::cerr << "recv failed: " << strerror(errno) << std::endl;
         return 1;
     }else if (bytesRead == 0)
     {
-        std::cout << "server disconnected." << std::endl;
+        std::cout << "zero bytes were read in a recvfrom call which means an empty datagram was sent." << std::endl;
     }
     else
     {
-        // print the message back out
-        std::cout << "Message from server: " << std::string(buffer, bytesRead) << std::endl;
+        sockaddr_in* castedSenderSockAddr = reinterpret_cast<sockaddr_in*>(&senderSockAddr);
+        sockaddr_in* castedServerSockAddr = reinterpret_cast<sockaddr_in*>(serverAddressInfo->ai_addr);
+        
+        if (castedSenderSockAddr->sin_addr.s_addr != castedServerSockAddr->sin_addr.s_addr)
+        {
+            std::cout << "received something that was not from the server we sent a message to..." << std::endl;
+        }
+        else
+        {
+            std::cout << "received something from server wi DID send the messag to" << std::endl;
+        }
+
+        std::cout << "Message: " << std::string(buffer, bytesRead) << std::endl;
     }
 
     //=================================================
