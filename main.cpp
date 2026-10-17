@@ -22,7 +22,7 @@ int RunServer()
     int status = -1;
     
     hints.ai_family = AF_INET; // i wanna use IPv4
-    hints.ai_socktype = SOCK_STREAM; // dont entirely understand why we need to specify sock stream to getaddrinfo, it seems like something you should pass into socket
+    hints.ai_socktype = SOCK_DGRAM; // dont entirely understand why we need to specify sock stream to getaddrinfo, it seems like something you should pass into socket
 
     // use getaddrinfo to get local IP
     if ((status = getaddrinfo("127.0.0.1", "3490", &hints, &myAddressInfo)) != 0)
@@ -61,56 +61,33 @@ int RunServer()
         return 1;
     }
 
-    // we're done with the addrinfo struct
-    freeaddrinfo(myAddressInfo);
-
     //==========================
-    // start listening
+    // UDP recvfrom
     //==========================
 
-    // remember, listen() is not blocking, this just tells the OS to start listening on this socket
-    // the OS handles the TCP handshaking and everything and puts stuff in the queue
-    // accept is the call that can be blocking.
-    if (listen(socketFd, 10) == -1)
+    char buffer[256];
+    sockaddr_storage senderSockAddr{};
+    socklen_t senderSockAddrSize = sizeof(senderSockAddr);
+    int bytesRead = -1;
+    if ((bytesRead = recvfrom(socketFd, buffer, sizeof(buffer), 0, reinterpret_cast<sockaddr*>(&senderSockAddr), &senderSockAddrSize)) == -1)
     {
-        std::cerr << "listen failed: " << strerror(errno) << std::endl;
+        std::cerr << "recvfrom failed: " << strerror(errno) << std::endl;
         return 1;
     }
 
     //==========================
-    // accept the connection
+    // see what was read
     //==========================
-    
-    // remember, we use sockaddr_storage for when a method is going to return a sockaddr somehow
-    // but we dont know what flavor of sockaddr its going to be
-    // sockaddr in this API is kind of like a C inheritance problem
-    // sockaddr is like a "base class", and there are more specific types of sockaddr like sockaddr_in
-    // or sockaddr_in6 (IPv4 vs IPv6), amongst others
-    // sockaddr_storage is just a struct you can use that promises to be large enough to fit any of the sockaddr types in it
-    sockaddr_storage theirAddress{};
-    socklen_t lengthOfTheirAddress = sizeof(theirAddress);
-    
-    // accept will block until the underlying queue has something to accept
-    int communicatorSocketFd = accept(
-        socketFd,
-        (sockaddr*)&theirAddress,
-        &lengthOfTheirAddress);
 
-    if(communicatorSocketFd == -1)
-    {
-        std::cerr << "accept failed: " << strerror(errno) << std::endl;
-        return 1;
-    }
-
-    // log who was accepted
-
-    char theirAddressStringBuffer[INET6_ADDRSTRLEN];
-    sockaddr_in* theirAddressCasted = reinterpret_cast<sockaddr_in*>(&theirAddress);
-    inet_ntop(AF_INET, &theirAddressCasted->sin_addr, theirAddressStringBuffer, INET6_ADDRSTRLEN);
-    std::cout << "Accepted connection from: " << theirAddressStringBuffer << std::endl;
+    // cast to IPv4 sockaddr
+    // in a real application, this hsould first read the family of the sockaddr_storage that was received to then determine which type it should be casted to
+    sockaddr_in* senderCastedSockAddr = reinterpret_cast<sockaddr_in*>(&senderSockAddr);
+    char senderAddrString[INET_ADDRSTRLEN];
+    inet_ntop(senderCastedSockAddr->sin_family, &senderCastedSockAddr->sin_addr, senderAddrString, INET_ADDRSTRLEN);
+    std::cout << "Message received from: " << senderAddrString << ":" << senderCastedSockAddr->sin_port << ":: " << buffer << std::endl; 
 
     //==========================
-    // say hi
+    // tell them you heard it
     //==========================
 
     // wait a sec before sending the message ...
@@ -119,10 +96,10 @@ int RunServer()
     std::cout << "Sending greeting message to client ..." << std::endl;
 
     std::string message("Hello from the server!");
-    ssize_t sent = send(communicatorSocketFd, message.c_str(), message.size(), 0);
+    ssize_t sent = sendto(socketFd, message.data(), message.size(), 0, reinterpret_cast<sockaddr*>(senderCastedSockAddr), sizeof(sockaddr_in));
     if(sent == -1)
     {
-        std::cerr << "send failed: " << strerror(errno) << std::endl;
+        std::cerr << "sendto failed: " << strerror(errno) << std::endl;
         return 1;
     }
 
@@ -131,32 +108,9 @@ int RunServer()
         std::cout << "send did not send all of the bytes for some reason????" << std::endl;
     }
 
-    //==========================
-    // recv acknowledge message
-    //==========================
-
-    char buffer[256]{};
-
-    int bytesRead = recv(communicatorSocketFd, buffer, sizeof(buffer), 0);
-    if (bytesRead == -1)
-    {
-        std::cerr << "recv failed: " << strerror(errno) << std::endl;
-        return 1;
-    }
-    else if (bytesRead == 0)
-    {
-        std::cout << "client disconnected." << std::endl;
-    }
-    else
-    {
-        // print the message back out
-        std::cout << "Message from client: " << std::string(buffer, bytesRead) << std::endl;
-    }
-
     // clean up (???)
 
     close(socketFd);
-    close(communicatorSocketFd);
 
     return 0;
 }
@@ -204,9 +158,11 @@ int RunClient()
     // connect to sockaddr with the created socket
     //=================================================
 
-    if (connect(socketFd, serverAddressInfo->ai_addr, serverAddressInfo->ai_addrlen) == -1)
+    std::string message("Hello server, anyone there?");
+    ssize_t bytesSent = -1;
+    if ((bytesSent = sendto(socketFd, message.data(), message.size(), 0, serverAddressInfo->ai_addr, serverAddressInfo->ai_addrlen)) == -1)
     {
-        std::cerr << "connect failed: " << strerror(errno) << std::endl;
+        std::cerr << "sendto failed: " << strerror(errno) << std::endl;
         return 1;
     }
 
@@ -216,7 +172,8 @@ int RunClient()
     
     char buffer[256]{};
     ssize_t bytesRead{};
-    if ((bytesRead = recv(socketFd, buffer, sizeof(buffer), 0)) == -1)
+    sockaddr_storage senderSockAddr{};
+    if ((bytesRead = recvfrom(socketFd, buffer, sizeof(buffer), 0, )) == -1)
     {
         std::cerr << "recv failed: " << strerror(errno) << std::endl;
         return 1;
@@ -228,21 +185,6 @@ int RunClient()
     {
         // print the message back out
         std::cout << "Message from server: " << std::string(buffer, bytesRead) << std::endl;
-    }
-
-    //=================================================
-    // send back acknowledgement from here
-    //=================================================
-
-    // wait for a sec first...
-    sleep(2);
-
-    std::string message("Hi, server! I've received your message.");
-    ssize_t bytesSent{};
-    if ((bytesSent = send(socketFd, message.data(), message.size(), 0)) == -1)
-    {
-        std::cerr << "send failed: " << strerror(errno) << std::endl;
-        return 1;
     }
 
     //=================================================
