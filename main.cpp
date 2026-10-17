@@ -173,7 +173,8 @@ int RunClient()
     char buffer[256]{};
     ssize_t bytesRead{};
     sockaddr_storage senderSockAddr{};
-    if ((bytesRead = recvfrom(socketFd, buffer, sizeof(buffer), 0, )) == -1)
+    socklen_t socklen{};
+    if ((bytesRead = recvfrom(socketFd, buffer, sizeof(buffer), 0, reinterpret_cast<sockaddr*>(&senderSockAddr), &socklen)) == -1)
     {
         std::cerr << "recv failed: " << strerror(errno) << std::endl;
         return 1;
