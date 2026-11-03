@@ -1,9 +1,13 @@
-cmake_minimum_required(VERSION 3.20)
+cmake_minimum_required(VERSION 3.25)
 
-project(sockets)
+project(dhdylan_Sockets)
 
 set(CMAKE_BUILD_TYPE Debug)
 
-add_executable(sockets main.cpp)
+add_subdirectory(sockets)
 
-target_compile_options(sockets PRIVATE -Wall)
+add_executable(example example.cpp)
+
+target_link_libraries(example PRIVATE dhdylan::Sockets)
+
+add_compile_options(example PRIVATE -Wall -g)
